@@ -12,7 +12,7 @@ graphics_settings:
 
 user_interface:
   viewport_mode: true                   # Hide all Isaac Sim panels except the viewport
-  split_screen: true                    # Show two side-by-side viewports when both vehicles are enabled
+  split_screen: true                   # Show two side-by-side viewports when both vehicles are enabled
 
 map_server:
   enabled: true
@@ -25,7 +25,7 @@ network_setup:
   ros2_cmd_timeout_s: 3.0               # Safety stop if no drive command received within this window.
 
 environment:
-  asset: "assets/environments/iv26.usd"
+  asset: "assets/environments/Oval_track.usd"
   scale: [1.0, 1.0, 1.0]
   rotation_euler: [0.0, 0.0, 0.0]
   translation: [0.0, 0.0, 0.0]
@@ -45,8 +45,8 @@ vehicles:
     enabled: true
     asset: "assets/vehicles/roboracer_max.usd"
     topic_prefix: "/ego"
-    spawn_position: [0.0, 0.0, 0.0]
-    spawn_orientation: [0.0, 0.0, 90.0]
+    spawn_position: [-10.0, -19.0, -5.0]
+    spawn_orientation: [0.0, 0.0, 0.0]
     enable_camera: true
     enable_lidar: true
     enable_gnss: true
@@ -55,8 +55,8 @@ vehicles:
     enabled: false
     asset: "assets/vehicles/roboracer_max.usd"
     topic_prefix: "/opponent"
-    spawn_position: [-2.0, 0.0, 0.0]
-    spawn_orientation: [0.0, 0.0, 90.0]
+    spawn_position: [-12.0, -19.0, -5.0]
+    spawn_orientation: [0.0, 0.0, 0.0]
     enable_camera: true
     enable_lidar: true
     enable_gnss: true
@@ -92,9 +92,9 @@ gnss:
   # GPS coordinate of the simulation world origin (0, 0, 0).
   # Sim X axis points East; sim Y axis points North.
   map_origin:
-    latitude: 39.984699        # degrees, positive = North
-    longitude: -75.226020      # degrees, positive = East
-    altitude: 0.0              # metres above WGS-84 ellipsoid
+    latitude:  0.0             # degrees, positive = North
+    longitude: 0.0	       # degrees, positive = East
+    altitude:  0.0             # metres above WGS-84 ellipsoid
   noise:
     horizontal_stddev_m: 0.5   # 1-sigma horizontal error (East & North)
     altitude_stddev_m: 1.0     # 1-sigma vertical error

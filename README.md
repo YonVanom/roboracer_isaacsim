@@ -85,7 +85,7 @@ To run the RoboRacer-Max on pumptrack_simple environment demo, inside the contai
 /root/isaacsim/_build/linux-x86_64/release/python.sh scripts/launch_sim.py 
 ```
 
-This will run the simulation with the default configuration file: `scripts/configs/pumptrack_simple_config.yaml`.
+This will run the simulation with the default configuration file: `scripts/configs/pumptrack_simple.yaml`.
 
 To run with a different configuration file, use the `--config` flag:
 
