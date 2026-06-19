@@ -1924,7 +1924,7 @@ def main():
     ts = config.get("keyboard_control_settings", {})
     MAX_SPEED = float(ts.get("max_speed_m_s", 15.0))
     MAX_STEER = float(ts.get("max_steer_rad", 0.52))
-    ACCEL = float(ts.get("acceleration_m_s2", 5.0))
+    ACCEL = float(ts.get("acceleration_m_s2", 2.0))
     DECEL = float(ts.get("deceleration_m_s2", ACCEL * 2.0))
     STEER_SPEED = float(ts.get("steering_speed_rad_s", 1.5))
     
@@ -2564,6 +2564,11 @@ def main():
                 # front wheel steered: the front prim is parented to steering geometry
                 # so its world position shifts even when the vehicle body is stationary.
                 raw_fwd = rot.GetRow(0)
+                # ExtractRotationMatrix() does not always return unit rows — the row
+                # magnitude equals the prim's world scale factor. Normalize so the
+                # smoothing buffers contain unit vectors regardless of vehicle scale.
+                _rf_len = raw_fwd.GetLength()
+                if _rf_len > 1e-6: raw_fwd = raw_fwd / _rf_len
                 # Smooth position
                 data["buf_x"].append(pos[0]); data["buf_y"].append(pos[1])
                 data["buf_z"].append(pos[2] + data["height"])
