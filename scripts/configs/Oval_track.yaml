@@ -92,9 +92,9 @@ gnss:
   # GPS coordinate of the simulation world origin (0, 0, 0).
   # Sim X axis points East; sim Y axis points North.
   map_origin:
-    latitude:  0.0             # degrees, positive = North
-    longitude: 0.0	       # degrees, positive = East
-    altitude:  0.0             # metres above WGS-84 ellipsoid
+    latitude: 0.0              # degrees, positive = North
+    longitude: 0.0             # degrees, positive = East
+    altitude: 0.0              # metres above WGS-84 ellipsoid
   noise:
     horizontal_stddev_m: 0.5   # 1-sigma horizontal error (East & North)
     altitude_stddev_m: 1.0     # 1-sigma vertical error
