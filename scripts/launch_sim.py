@@ -1844,13 +1844,20 @@ def main():
             print(f"[Segmentation] Assigned semantic labels to {_labeled} Mesh prims.")
 
             # Find the RGB camera under /World/Ego_Vehicle.
-            # Prefer cameras whose name contains "color" or "rgb".
-            # Explicitly skip depth cameras (name contains "depth").
-            _ego_cam_path = None
+            # If camera_prim is set in the config, find the first camera whose
+            # path ends with that value. Otherwise prefer "color"/"rgb" cameras,
+            # falling back to any non-depth camera.
+            _seg_cam_prim  = seg_cfg.get("camera_prim", None)
+            _ego_cam_path  = None
             _ego_cam_fallback = None
             for _prim in _seg_stage.Traverse():
                 _ps = _prim.GetPath().pathString
                 if not _ps.startswith("/World/Ego_Vehicle") or not _prim.IsA(UsdGeom.Camera):
+                    continue
+                if _seg_cam_prim:
+                    if _ps.endswith(_seg_cam_prim) or _prim.GetName() == _seg_cam_prim:
+                        _ego_cam_path = _ps
+                        break
                     continue
                 _cam_name_lower = _prim.GetName().lower()
                 if "depth" in _cam_name_lower:
@@ -1924,7 +1931,7 @@ def main():
     ts = config.get("keyboard_control_settings", {})
     MAX_SPEED = float(ts.get("max_speed_m_s", 15.0))
     MAX_STEER = float(ts.get("max_steer_rad", 0.52))
-    ACCEL = float(ts.get("acceleration_m_s2", 5.0))
+    ACCEL = float(ts.get("acceleration_m_s2", 2.0))
     DECEL = float(ts.get("deceleration_m_s2", ACCEL * 2.0))
     STEER_SPEED = float(ts.get("steering_speed_rad_s", 1.5))
     
@@ -2564,6 +2571,11 @@ def main():
                 # front wheel steered: the front prim is parented to steering geometry
                 # so its world position shifts even when the vehicle body is stationary.
                 raw_fwd = rot.GetRow(0)
+                # ExtractRotationMatrix() does not always return unit rows — the row
+                # magnitude equals the prim's world scale factor. Normalize so the
+                # smoothing buffers contain unit vectors regardless of vehicle scale.
+                _rf_len = raw_fwd.GetLength()
+                if _rf_len > 1e-6: raw_fwd = raw_fwd / _rf_len
                 # Smooth position
                 data["buf_x"].append(pos[0]); data["buf_y"].append(pos[1])
                 data["buf_z"].append(pos[2] + data["height"])
