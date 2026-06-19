@@ -102,16 +102,17 @@ gnss:
     horizontal_stddev_m: 0.5   # 1-sigma horizontal error (East & North)
     altitude_stddev_m: 1.0     # 1-sigma vertical error
 
-#semantic_segmentation:
-#  id_keywords:
-#    0: ["default"]             # non-drivable
-#    1: ["track"]               # drivable
-#  color_map:
-#    0: [61, 93, 255]           # non-drivable  -> blue
-#    1: [0, 255, 220]           # drivable      -> Cyan
-#  capture_frequency: 4         # Hz → every (60Hz / 4Hz) = 15 frames
-#  image_resolution: [1280, 720]
-#  images_dir: "data/segmentation/pumptrack_simple/pumptrack_simple/images"
-#  gt_masks_dir: "data/segmentation/pumptrack_simple/pumptrack_simple/gt_masks"
-#  overwrite_existing: false
+semantic_segmentation:
+  camera_prim: "CameraLeft"    # ZED_XM primary RGB camera
+  id_keywords:
+    0: ["default"]             # non-drivable
+    1: ["track"]               # drivable
+  color_map:
+    0: [61, 93, 255]           # non-drivable  -> blue
+    1: [0, 255, 220]           # drivable      -> Cyan
+  capture_frequency: 4         # Hz → every (60Hz / 4Hz) = 15 frames
+  image_resolution: [1280, 720]
+  images_dir: "data/segmentation/levine/levine/images"
+  gt_masks_dir: "data/segmentation/levine/levine/gt_masks"
+  overwrite_existing: false
 

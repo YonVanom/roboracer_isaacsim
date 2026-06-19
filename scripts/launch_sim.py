@@ -1844,13 +1844,20 @@ def main():
             print(f"[Segmentation] Assigned semantic labels to {_labeled} Mesh prims.")
 
             # Find the RGB camera under /World/Ego_Vehicle.
-            # Prefer cameras whose name contains "color" or "rgb".
-            # Explicitly skip depth cameras (name contains "depth").
-            _ego_cam_path = None
+            # If camera_prim is set in the config, find the first camera whose
+            # path ends with that value. Otherwise prefer "color"/"rgb" cameras,
+            # falling back to any non-depth camera.
+            _seg_cam_prim  = seg_cfg.get("camera_prim", None)
+            _ego_cam_path  = None
             _ego_cam_fallback = None
             for _prim in _seg_stage.Traverse():
                 _ps = _prim.GetPath().pathString
                 if not _ps.startswith("/World/Ego_Vehicle") or not _prim.IsA(UsdGeom.Camera):
+                    continue
+                if _seg_cam_prim:
+                    if _ps.endswith(_seg_cam_prim) or _prim.GetName() == _seg_cam_prim:
+                        _ego_cam_path = _ps
+                        break
                     continue
                 _cam_name_lower = _prim.GetName().lower()
                 if "depth" in _cam_name_lower:
