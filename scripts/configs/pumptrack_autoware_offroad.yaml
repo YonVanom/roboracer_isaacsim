@@ -84,10 +84,10 @@ keyboard_control_settings:
   deceleration_m_s2: 10.0
   steering_speed_rad_s: 3.0
 
-follow_camera:  
-  distance: 4.5     # Distance behind the vehicle (meters)
-  height: 1.5       # Camera height above ground (meters)
-  focus_height: 0.8 # Look-at target height on the vehicle (meters)
+follow_camera:
+  distance: 2.5     # Distance behind the vehicle (meters)
+  height: 0.75      # Camera height above ground (meters)
+  focus_height: 0.4 # Look-at target height on the vehicle (meters)
 
 gnss:
   enabled: true
