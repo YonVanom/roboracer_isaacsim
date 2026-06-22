@@ -73,7 +73,7 @@ RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
 
 # Clone Isaac Sim repository
 WORKDIR /root
-RUN git clone -b develop https://github.com/isaac-sim/IsaacSim.git isaacsim && \
+RUN git clone -b v6.0.0-dev2 https://github.com/isaac-sim/IsaacSim.git isaacsim && \
     cd isaacsim && \
     git lfs install && \
     git lfs pull

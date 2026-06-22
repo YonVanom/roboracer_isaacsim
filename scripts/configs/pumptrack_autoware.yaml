@@ -101,6 +101,7 @@ gnss:
     altitude_stddev_m: 1.0     # 1-sigma vertical error
 
 semantic_segmentation:
+  enabled: false
   id_keywords:
     0: ["default"]             # non-drivable
     1: ["track"]               # drivable

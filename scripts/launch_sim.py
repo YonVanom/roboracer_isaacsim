@@ -1750,7 +1750,7 @@ def main():
 
     # ── Segmentation Dataset Setup ────────────────────────────────────────────
     seg_cfg = config.get("semantic_segmentation", {})
-    seg_enabled = bool(seg_cfg)
+    seg_enabled = bool(seg_cfg) and bool(seg_cfg.get("enabled", True))
     seg_rgb_annot = None
     seg_mask_annot = None
     seg_id_keywords = {}

@@ -33,12 +33,9 @@ environment:
     - name: "TirePhysicsMaterial"
       dynamic_friction: 1.0
       static_friction: 1.0
-    - name: "AsphaltPhysicsMaterial"
-      dynamic_friction: 0.7
-      static_friction: 0.9
-    - name: "GrassPhysicsMaterial"
-      dynamic_friction: 0.4
-      static_friction: 0.6
+    - name: "CarpetPhysicsMaterial"
+      dynamic_friction: 1.0
+      static_friction: 1.0
 
 vehicles:
   - name: "Ego_Vehicle"
@@ -100,6 +97,7 @@ gnss:
     altitude_stddev_m: 1.0     # 1-sigma vertical error
 
 semantic_segmentation:
+  enabled: false
   id_keywords:
     0: ["default"]             # non-drivable
     1: ["track"]               # drivable

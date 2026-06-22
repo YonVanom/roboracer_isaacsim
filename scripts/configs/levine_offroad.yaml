@@ -103,6 +103,7 @@ gnss:
     altitude_stddev_m: 1.0     # 1-sigma vertical error
 
 semantic_segmentation:
+  enabled: false
   camera_prim: "CameraLeft"    # ZED_XM primary RGB camera
   id_keywords:
     0: ["default"]             # non-drivable
