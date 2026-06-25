@@ -47,6 +47,10 @@ def main():
     ui_cfg = config.get("user_interface", {})
     _ui_viewport_mode = not headless_mode and bool(ui_cfg.get("viewport_mode", False))
     _ui_split_screen  = not headless_mode and bool(ui_cfg.get("split_screen", False))
+    # Default control mode for vehicles at startup (non-headless). "KEYBOARD" →
+    # KEYBOARD_CONTROL, "ROS2_CONTROL" → ROS2_CONTROL. Headless always overrides
+    # to ROS2_CONTROL below since no keyboard is available.
+    _ui_default_ctrl_mode = str(ui_cfg.get("default_control_mode", "KEYBOARD")).strip().upper()
 
     # ── CycloneDDS setup ──────────────────────────────────────────────────
     # Belt-and-suspenders: set RMW explicitly in case Isaac Sim's Python doesn't
@@ -1773,7 +1777,11 @@ def main():
 
     # Per-vehicle explicit control mode: "KEYBOARD_CONTROL" or "ROS2_CONTROL". Toggled by holding 1/2.
     # In headless mode all vehicles default to ROS2_CONTROL (no keyboard available).
-    _default_ctrl = "ROS2_CONTROL" if headless_mode else "KEYBOARD_CONTROL"
+    # Otherwise the default comes from user_interface.default_control_mode in the config.
+    if headless_mode:
+        _default_ctrl = "ROS2_CONTROL"
+    else:
+        _default_ctrl = "ROS2_CONTROL" if _ui_default_ctrl_mode == "ROS2_CONTROL" else "KEYBOARD_CONTROL"
     veh_ctrl_mode = {veh["name"]: _default_ctrl for veh in vehicles if veh.get("enabled", True)}
     # Track the last mode each vehicle's OmniGraph publisher was routed for,
     # so we only call og.Controller.set() on the topicName when it actually changes.

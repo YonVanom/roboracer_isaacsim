@@ -12,7 +12,8 @@ graphics_settings:
 
 user_interface:
   viewport_mode: true                   # Hide all Isaac Sim panels except the viewport
-  split_screen: true                   # Show two side-by-side viewports when both vehicles are enabled
+  default_control_mode: "KEYBOARD"      # Startup control mode: "KEYBOARD" or "ROS2_CONTROL"
+  split_screen: true                    # Show two side-by-side viewports when both vehicles are enabled
 
 map_server:
   enabled: true
