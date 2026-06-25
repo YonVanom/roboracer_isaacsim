@@ -63,8 +63,11 @@ RUN apt-get update && apt-get install -y \
     python3-colcon-common-extensions \
     && rm -rf /var/lib/apt/lists/*
 
-# Set RMW implementation
+# Set RMW implementation and expose ROS2 libraries to the dynamic linker.
+# Without LD_LIBRARY_PATH, Isaac Sim's isaacsim.ros2.bridge C++ extension
+# cannot find librmw_cyclonedds_cpp.so and crashes at startup.
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+ENV LD_LIBRARY_PATH=/opt/ros/humble/lib:/opt/ros/humble/lib/x86_64-linux-gnu
 # Allow running as root
 ENV OMNI_KIT_ALLOW_ROOT=1
 
@@ -73,7 +76,7 @@ RUN echo "source /opt/ros/humble/setup.bash" >> /root/.bashrc
 
 # Clone Isaac Sim repository
 WORKDIR /root
-RUN git clone -b v6.0.0-dev2 https://github.com/isaac-sim/IsaacSim.git isaacsim && \
+RUN git clone https://github.com/isaac-sim/IsaacSim.git isaacsim && \
     cd isaacsim && \
     git lfs install && \
     git lfs pull

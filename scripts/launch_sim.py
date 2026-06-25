@@ -490,7 +490,16 @@ def main():
     carb_settings.set_int("/persistent/simulation/minFrameRate", app_freq)
     carb_settings.set_bool("/app/runLoops/main/rateLimitEnabled", True)
     carb_settings.set_int("/app/runLoops/main/rateLimitFrequency", app_freq)
-    
+
+    # Suppress the [PoseTree] "parent getObjectType eInvalid" warning flood from
+    # the ROS2 TF publisher.  carb logging is synchronous on the main loop, so a
+    # failing TF node logging at tick rate (×N target frames) injects variable
+    # per-step latency and destabilizes the real-time factor.  Drop this channel
+    # to Error so warnings don't steal step budget.  NOTE: this only hides the
+    # spam — the underlying TF tree failure is reported by the PoseTree diag pass
+    # below and must be fixed for the map->odom->base_link chain to be complete.
+    carb_settings.set("/log/channels/isaacsim.ros2.nodes", "Error")
+
     # Standard timeline execution loop since omni.isaac.core is deprecated in this build module
     import omni.timeline
     import omni.physx
@@ -1070,6 +1079,68 @@ def main():
             if _fid_count > 0:
                 print(f"[ROS2 remap OG] {veh_name}: {_fid_count} frame ID(s) remapped post-play")
 
+        # ── PoseTree (TF publisher) parentPrim validity diagnostic ────────────
+        # The "[PoseTree] parent getObjectType eInvalid" flood means a
+        # ROS2PublishTransformTree node cannot resolve its parentPrim/targetPrims
+        # at evaluation time — so NO base_link->sensor transforms are published
+        # and the TF chain (map->odom->base_link->sensors) is broken downstream.
+        # The usual causes: the prim lives inside an instanceable reference
+        # (interior prims unresolvable), or it isn't an Xformable.  Report the
+        # exact prim type + instanceable status so the node can be fixed.
+        def _pt_prim_report(_pp):
+            _pp = str(_pp)
+            _pr = stage.GetPrimAtPath(_pp)
+            if not _pr or not _pr.IsValid():
+                return f"{_pp}  ->  MISSING (no prim at path)"
+            # Walk ancestors to flag any instanceable parent, which hides
+            # interior prims from Fabric/PhysX and yields eInvalid.
+            _anc = _pr.GetParent()
+            _anc_inst = None
+            while _anc and _anc.IsValid() and _anc.GetPath().pathString not in ("/", ""):
+                if _anc.IsInstanceable():
+                    _anc_inst = _anc.GetPath().pathString
+                    break
+                _anc = _anc.GetParent()
+            return (f"{_pp}  type={_pr.GetTypeName() or '<none>'}  "
+                    f"instanceable={_pr.IsInstanceable()}  "
+                    f"instanceProxy={_pr.IsInstanceProxy()}  "
+                    f"instanceableAncestor={_anc_inst or 'none'}")
+
+        def _pt_rel_targets(_prim, _name):
+            _r = _prim.GetRelationship(_name)
+            if _r:
+                _tg = _r.GetTargets()
+                if _tg:
+                    return list(_tg)
+            _a = _prim.GetAttribute(_name)
+            if _a:
+                try:
+                    _v = _a.Get()
+                    if _v:
+                        return list(_v) if isinstance(_v, (list, tuple)) else [_v]
+                except Exception:
+                    pass
+            return []
+
+        for prim in stage.Traverse():
+            p_path = prim.GetPath().pathString
+            if not p_path.startswith(veh_prim_path) or prim.GetTypeName() != "OmniGraphNode":
+                continue
+            _nt_attr = prim.GetAttribute("node:type")
+            _ntype = _nt_attr.Get() if _nt_attr else ""
+            if "PublishTransformTree" not in (_ntype or ""):
+                continue
+            print(f"[PoseTree diag] {veh_name}: node {p_path} (type={_ntype})")
+            _parents = _pt_rel_targets(prim, "inputs:parentPrim")
+            if not _parents:
+                print(f"[PoseTree diag]   parentPrim: <none set>")
+            for _pp in _parents:
+                print(f"[PoseTree diag]   parentPrim: {_pt_prim_report(_pp)}")
+            _tgts = _pt_rel_targets(prim, "inputs:targetPrims")
+            print(f"[PoseTree diag]   {len(_tgts)} targetPrim(s)")
+            for _pp in _tgts:
+                print(f"[PoseTree diag]   target: {_pt_prim_report(_pp)}")
+
     # ── Post-play sensor helper disable (OG runtime now fully initialized) ────
     for _sg_veh in vehicles:
         if not _sg_veh.get("enabled", True): continue
@@ -1233,6 +1304,8 @@ def main():
             else:
                 print("[Map] WARNING: semantic annotator returned no data — /map not published")
 
+            try: _map_annot.detach(_map_rp)
+            except Exception: pass
             try: _map_rp.destroy()
             except Exception: pass
             try: _map_stage.RemovePrim(_map_cp)
