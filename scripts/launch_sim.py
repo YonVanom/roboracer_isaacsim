@@ -305,6 +305,18 @@ def main():
             prim.CreateAttribute("physxScene:broadphaseType", Sdf.ValueTypeNames.Token).Set(bp_type)
             print(f"[Physics] Force-configured Singleton PhysicsScene at '/physicsScene' -> Solver: {solver_type}, Steps: {time_steps}, GPU: {enable_gpu}, BP: {bp_type}")
 
+        # Optionally apply a PhysX vehicle context to the PhysicsScene(s).
+        # Off by default: only needed if assets rely on the PhysX Vehicle wheel/tire framework.
+        if bool(physics_opts.get("enable_vehicle_context", False)):
+            from pxr import PhysxSchema
+            for prim in stage.Traverse():
+                if prim.IsA(UsdPhysics.Scene):
+                    vehicle_context_api = PhysxSchema.PhysxVehicleContextAPI.Apply(prim)
+                    vehicle_context_api.CreateUpdateModeAttr(PhysxSchema.Tokens.velocityChange)
+                    vehicle_context_api.CreateVerticalAxisAttr(PhysxSchema.Tokens.posZ)
+                    vehicle_context_api.CreateLongitudinalAxisAttr(PhysxSchema.Tokens.posX)
+                    print(f"[Physics] Applied PhysxVehicleContextAPI to '{prim.GetPath()}'")
+
         # Apply per-articulation solver iteration counts to all articulation roots
         try:
             from pxr import PhysxSchema
@@ -517,9 +529,61 @@ def main():
     
     print(f"[Teleop] Using ROS2 Publisher Node Type: {pub_node_type}")
 
-    # Intercept the ActionGraph for EACH vehicle to inject viewport loopback
-    # Strategy: Discover the existing AckermannController node and drive it directly PLUS
-    #            inject a ROS2 publisher wired to the existing ros2_context for observability.
+    def _trace_downstream_attr(stage, veh_name, src_node_path, src_attr_name):
+        """Find the (node_path, attr_name) of the first input anywhere in this vehicle's
+        subtree that is connected from src_node_path.src_attr_name."""
+        src_full = f"{src_node_path}.{src_attr_name}"
+        for prim in stage.Traverse():
+            p_path = prim.GetPath().pathString
+            if not p_path.startswith(f"/World/{veh_name}"): continue
+            for attr in prim.GetAttributes():
+                if not attr.GetName().startswith("inputs:"): continue
+                for conn in attr.GetConnections():
+                    if str(conn) == src_full:
+                        return p_path, attr.GetName()
+        return None, None
+
+    def _find_exec_dependents(stage, veh_name, source_node_paths, exclude_path):
+        """Find node paths (within this vehicle) whose inputs:execIn is fed directly by
+        any of source_node_paths, other than exclude_path itself. These nodes would stop
+        updating once source_node_paths get disabled for TELEOP and need an independent
+        backup trigger instead."""
+        targets = []
+        for prim in stage.Traverse():
+            p_path = prim.GetPath().pathString
+            if not p_path.startswith(f"/World/{veh_name}"): continue
+            if p_path == exclude_path: continue
+            _ei = prim.GetAttribute("inputs:execIn")
+            if not _ei: continue
+            for conn in _ei.GetConnections():
+                if str(conn.GetPrimPath()) in source_node_paths:
+                    if p_path not in targets:
+                        targets.append(p_path)
+                    break
+        return targets
+
+    # Isaac Sim's omni.physx.vehicle extension ships its own built-in keyboard/gamepad
+    # input handler for any prim with PhysxVehicleControllerAPI, writing the same
+    # physxVehicleController:accelerator/brake/steer/targetGear attributes our own
+    # teleop loop drives — fighting it for control on every arrow-key press. Acquire the
+    # interface once here so each PhysX Vehicle rig can have that native input disabled
+    # below, leaving our own teleop loop as the sole writer.
+    try:
+        import omni.physxvehicle
+        _physx_vehicle_iface = omni.physxvehicle.get_physx_vehicle_interface()
+    except Exception as _pv_e:
+        print(f"[Teleop] Warning: omni.physxvehicle interface unavailable ({_pv_e}); "
+              f"built-in PhysX Vehicle keyboard input will not be disabled.")
+        _physx_vehicle_iface = None
+
+    # Intercept the ActionGraph for EACH vehicle to inject viewport loopback.
+    # Strategy: drive the vehicle's control attributes directly PLUS inject a ROS2
+    # publisher wired to the existing ros2_context for observability. Prefer an explicit
+    # AckermannController node when present (RoboRacer-style rigs); otherwise generically
+    # trace where the ROS2 AckermannDrive subscriber's speed/steeringAngle outputs are
+    # consumed downstream and drive that attribute instead (PhysX Vehicle rigs, which have
+    # no single "controller" node — see kar_gokart_isaac_physx.usd's PID/write-attribute
+    # chain).
     for i, veh in enumerate(vehicles):
         veh_name = veh.get("name", f"Vehicle_{i}")
         _veh_prefix = "/" + veh.get("topic_prefix", f"/vehicle_{i}").strip("/")
@@ -527,6 +591,23 @@ def main():
         if not veh.get("enabled", True): continue
             
         print(f"[Teleop] Processing {veh_name} for Loopback on {veh_topic}...")
+
+        # Disable the engine's own built-in keyboard/gamepad vehicle input for any PhysX
+        # Vehicle rig (e.g. kar_gokart_isaac_physx.usd) so it stops fighting our teleop
+        # loop for the same physxVehicleController:* attributes. No-op for
+        # articulation-based rigs (e.g. roboracer_offroad.usd), which have no prim with
+        # PhysxVehicleControllerAPI applied.
+        if _physx_vehicle_iface is not None:
+            from pxr import PhysxSchema
+            for prim in stage.Traverse():
+                p_path = prim.GetPath().pathString
+                if not p_path.startswith(f"/World/{veh_name}"): continue
+                if not prim.HasAPI(PhysxSchema.PhysxVehicleControllerAPI): continue
+                try:
+                    _physx_vehicle_iface.set_input_enabled(p_path, False)
+                    print(f"[Teleop] {veh_name}: disabled built-in PhysX Vehicle input on '{p_path}'")
+                except Exception as _pvi_e:
+                    print(f"[Teleop] {veh_name}: warning could not disable built-in PhysX Vehicle input on '{p_path}': {_pvi_e}")
         
         ackermann_ctrl_node = None
         ackermann_ctrl_path = ""
@@ -554,6 +635,9 @@ def main():
                 except Exception: pass
 
             if "AckermannController" in n_type:
+                # RoboRacer-style rigs: an explicit controller node with dedicated
+                # inputs:speed/inputs:steeringAngle. PhysX Vehicle rigs have no such node
+                # — see the generic downstream trace below instead.
                 ackermann_ctrl_node = _og_node if (_og_node and _og_node.is_valid()) else og.get_node_by_path(p_path)
                 ackermann_ctrl_path = p_path
             elif "ROS2Context" in n_type:
@@ -583,15 +667,46 @@ def main():
             except Exception as _ste:
                 print(f"[Teleop] {veh_name}: could not resolve subscriber tick: {_ste}")
 
-        if not ackermann_ctrl_node:
-            print(f"[Teleop] WARNING: No AckermannController for {veh_name}. Skipping teleop setup.")
+        # 2. Resolve the actual control attributes to drive. Prefer the explicit
+        #    AckermannController when present (its inputs:speed/steeringAngle are
+        #    fixed-type, so disconnecting the subscriber's feed and overriding them
+        #    directly works cleanly — see the sub_ctrl_connections handling below).
+        #    Otherwise (PhysX Vehicle rigs like kar_gokart_isaac_physx.usd, which drive
+        #    physxVehicleController:* off a PID/steering-normalization chain built from
+        #    generic Divide/Clamp/Negate nodes) trace the subscriber's outputs:speed/
+        #    outputs:steeringAngle downstream to whatever consumes them — those
+        #    destinations get routed through a small ConstantDouble passthrough injected
+        #    below, rather than overridden directly, because: (a) generic-math-node inputs
+        #    are "extended type" attributes that only have a concrete runtime type while
+        #    connected, so disconnecting one and writing to it raises "Tried to get the
+        #    value from an unresolved attribute"; and (b) writing to the subscriber's own
+        #    output instead doesn't reliably propagate through the connection without the
+        #    subscriber itself recomputing, which won't happen once its topic is muted.
+        ctrl_attr_speed_path = ctrl_attr_steer_path = None
+        anchor_node_path = None
+        _override_targets = None  # {"speed": (dst_node_path, dst_attr_name), "steer": (...)}
+        if ackermann_ctrl_node:
+            ctrl_attr_speed_path = f"{ackermann_ctrl_path}.inputs:speed"
+            ctrl_attr_steer_path = f"{ackermann_ctrl_path}.inputs:steeringAngle"
+            anchor_node_path = ackermann_ctrl_path
+        elif subscribe_node_path:
+            _speed_dst = _trace_downstream_attr(stage, veh_name, subscribe_node_path, "outputs:speed")
+            _steer_dst = _trace_downstream_attr(stage, veh_name, subscribe_node_path, "outputs:steeringAngle")
+            if _speed_dst[0] and _steer_dst[0]:
+                _override_targets = {"speed": _speed_dst, "steer": _steer_dst}
+                anchor_node_path = subscribe_node_path
+                print(f"[Teleop] {veh_name}: no AckermannController — routing "
+                      f"'{_speed_dst[0]}.{_speed_dst[1]}' / '{_steer_dst[0]}.{_steer_dst[1]}' through override nodes instead.")
+
+        if not ((ctrl_attr_speed_path and ctrl_attr_steer_path) or _override_targets):
+            print(f"[Teleop] WARNING: No AckermannController or recognizable drive chain for {veh_name}. Skipping teleop setup.")
             continue
 
         try:
-            graph_obj = ackermann_ctrl_node.get_graph()
+            _anchor_og_node = ackermann_ctrl_node if ackermann_ctrl_node else og.get_node_by_path(anchor_node_path)
+            graph_obj = _anchor_og_node.get_graph()
             ackermann_graph_path = graph_obj.get_path_to_graph()
-            ctrl_node_name = ackermann_ctrl_path.split("/")[-1]
-            
+
             # Names for nodes we will inject
             tick_node_name = f"TeleopTick_{veh_name}_{i}"
             pub_node_name  = f"ViewportPublisher_{veh_name}_{i}"
@@ -602,7 +717,7 @@ def main():
             time_node_type = "omni.isaac.core_nodes.IsaacReadSimulationTime"
             # In some 5.x versions it might be isaacsim.core_nodes.IsaacReadSimulationTime
             # We will try to create the graph nodes and handle failures gracefully
-            
+
             create_cmds = [
                 (tick_node_name, "omni.graph.action.OnPlaybackTick"),
                 (pub_tick_name, "omni.graph.action.OnPlaybackTick"),
@@ -613,9 +728,51 @@ def main():
                 (f"{pub_node_name}.inputs:frameId", "base_link"),
             ]
             connect_cmds = [
-                (f"{tick_node_name}.outputs:tick", f"{ctrl_node_name}.inputs:execIn"),
                 (f"{pub_tick_name}.outputs:tick", f"{pub_node_name}.inputs:execIn"),
             ]
+
+            # For generically-traced destinations (no AckermannController), rewire
+            # "<destination> <- ConstantDouble.outputs:value" once here and write our
+            # override value onto the constant's own (always fixed-type) inputs:value
+            # every tick instead — see the comment above _override_targets for why.
+            if _override_targets:
+                for _key, (_dst_node, _dst_attr) in _override_targets.items():
+                    _const_name = f"TeleopOverride_{_key}_{veh_name}_{i}"
+                    create_cmds.append((_const_name, "omni.graph.nodes.ConstantDouble"))
+                    _src_out_attr = "outputs:speed" if _key == "speed" else "outputs:steeringAngle"
+                    try:
+                        og.Controller.disconnect(
+                            og.Controller.attribute(f"{subscribe_node_path}.{_src_out_attr}"),
+                            og.Controller.attribute(f"{_dst_node}.{_dst_attr}"),
+                        )
+                    except Exception as _dc_e:
+                        print(f"[Teleop] {veh_name}: warning could not disconnect {_key} feed: {_dc_e}")
+                    # ConstantDouble has no separate outputs:value — other nodes connect
+                    # straight to its inputs:value (matching how the existing graph's own
+                    # constant_double/constant_double_01 nodes are wired elsewhere here).
+                    connect_cmds.append((f"{_const_name}.inputs:value", f"{_dst_node.split('/')[-1]}.{_dst_attr}"))
+                    _override_attr_path = f"{ackermann_graph_path}/{_const_name}.inputs:value"
+                    if _key == "speed":
+                        ctrl_attr_speed_path = _override_attr_path
+                    else:
+                        ctrl_attr_steer_path = _override_attr_path
+                print(f"[Teleop] {veh_name}: override nodes -> speed='{ctrl_attr_speed_path}', steer='{ctrl_attr_steer_path}'")
+
+            # Any node whose inputs:execIn is fed by the subscriber's tick source or by
+            # the subscriber's own execOut will go dark once those get disabled for
+            # TELEOP below (or, for nodes gated on the subscriber's execOut, simply never
+            # fires at all in KEYBOARD_CONTROL since that only pulses on a fresh ROS2
+            # message). Give each of them an independent trigger from our own tick so
+            # they keep updating regardless of ROS2 traffic or control mode. This covers
+            # the AckermannController case as well as PhysX Vehicle rigs where odometry,
+            # the PID node, and attribute writers all hang off the same shared tick.
+            _tick_sources = {p for p in (sub_tick_path, subscribe_node_path) if p}
+            _immunize_targets = _find_exec_dependents(stage, veh_name, _tick_sources, subscribe_node_path) if _tick_sources else []
+            for _tgt in _immunize_targets:
+                connect_cmds.append((f"{tick_node_name}.outputs:tick", f"{_tgt.split('/')[-1]}.inputs:execIn"))
+            if _immunize_targets:
+                print(f"[Teleop] {veh_name}: independent tick wired into {[t.split('/')[-1] for t in _immunize_targets]}")
+
             if ros2_context_path:
                 ctx_node_name = ros2_context_path.split("/")[-1]
                 connect_cmds.append((f"{ctx_node_name}.outputs:context", f"{pub_node_name}.inputs:context"))
@@ -630,22 +787,23 @@ def main():
             # override og.Controller.set() authored values — even when the
             # subscriber's tick is disabled. The only reliable fix is to
             # disconnect them when entering TELEOP and reconnect for ROS2.
+            # Only applies to the AckermannController path: the generic/_override_targets
+            # path already permanently disconnected and rewired its destinations above,
+            # once at setup, so there is nothing left to manage per mode-switch here.
             _sub_ctrl_conns = []  # list of (src_attr_path, dst_attr_path)
-            if subscribe_node_path and ackermann_ctrl_path:
-                _ctrl_prim = stage.GetPrimAtPath(ackermann_ctrl_path)
-                for _inp in ("inputs:speed", "inputs:steeringAngle"):
-                    _usd_attr = _ctrl_prim.GetAttribute(_inp)
-                    if not _usd_attr:
-                        continue
-                    for _src in _usd_attr.GetConnections():
-                        if str(_src.GetPrimPath()) == subscribe_node_path:
-                            _sub_ctrl_conns.append((str(_src), f"{ackermann_ctrl_path}.{_inp}"))
+            if ackermann_ctrl_node and subscribe_node_path:
+                for _out_attr, _dst_full in (("outputs:speed", ctrl_attr_speed_path), ("outputs:steeringAngle", ctrl_attr_steer_path)):
+                    _src_full = f"{subscribe_node_path}.{_out_attr}"
+                    _dst_prim_path, _dst_attr_name = _dst_full.rsplit(".", 1)
+                    _dst_usd_attr = stage.GetPrimAtPath(_dst_prim_path).GetAttribute(_dst_attr_name)
+                    if _dst_usd_attr and any(str(_c) == _src_full for _c in _dst_usd_attr.GetConnections()):
+                        _sub_ctrl_conns.append((_src_full, _dst_full))
             if _sub_ctrl_conns:
                 print(f"[Teleop] {veh_name}: found {len(_sub_ctrl_conns)} subscriber→controller connection(s) to manage")
 
             vehicle_teleop_publishers[veh_name] = {
-                "ctrl_attr_speed": f"{ackermann_graph_path}/{ctrl_node_name}.inputs:speed",
-                "ctrl_attr_steer": f"{ackermann_graph_path}/{ctrl_node_name}.inputs:steeringAngle",
+                "ctrl_attr_speed": ctrl_attr_speed_path,
+                "ctrl_attr_steer": ctrl_attr_steer_path,
                 "pub_node_path":  f"{ackermann_graph_path}/{pub_node_name}",
                 "pub_topic_attr": f"{ackermann_graph_path}/{pub_node_name}.inputs:topicName",
                 "drive_topic":    veh_topic,
@@ -1700,7 +1858,7 @@ def main():
 
     # Per-vehicle explicit control mode: "KEYBOARD_CONTROL" or "ROS2_CONTROL". Toggled by holding 1/2.
     # In headless mode all vehicles default to ROS2_CONTROL (no keyboard available).
-    _default_ctrl = "ROS2_CONTROL" if headless_mode else "KEYBOARD_CONTROL"
+    _default_ctrl = "ROS2_CONTROL" #if headless_mode else "KEYBOARD_CONTROL"
     veh_ctrl_mode = {veh["name"]: _default_ctrl for veh in vehicles if veh.get("enabled", True)}
     # Track the last mode each vehicle's OmniGraph publisher was routed for,
     # so we only call og.Controller.set() on the topicName when it actually changes.
