@@ -308,6 +308,15 @@ def sample_points(v0, v1, v2, normals, areas,
         (intensity.astype(np.float32) if intensity is not None else None)
 
 
+def rotate_z(vecs: np.ndarray, angle_rad: float) -> np.ndarray:
+    """Rotate Nx3 vectors around the Z axis by angle_rad (right-hand rule)."""
+    c, s = np.cos(angle_rad), np.sin(angle_rad)
+    rot = np.array([[c, -s, 0.0],
+                    [s,  c, 0.0],
+                    [0.0, 0.0, 1.0]], dtype=np.float32)
+    return (vecs @ rot.T).astype(np.float32)
+
+
 # ---------------------------------------------------------------------------
 # Writers
 # ---------------------------------------------------------------------------
@@ -397,6 +406,9 @@ def main():
     p.add_argument("--intensity-noise", type=float, default=0.0,
                    help="Stddev of Gaussian jitter added to intensity, in the "
                         "same units as --intensity-scale (default: 0, no noise)")
+    p.add_argument("--z-rotation", type=float, default=-np.pi / 2,
+                   help="Rotation (radians) applied around Z after sampling, "
+                        "to correct USD/PCD frame mismatch (default: -pi/2)")
     args = p.parse_args()
 
     out = args.output or str(
@@ -415,6 +427,11 @@ def main():
                              colors=colors,
                              intensity_scale=args.intensity_scale,
                              intensity_noise=args.intensity_noise)
+    if args.z_rotation != 0.0:
+        pts = rotate_z(pts, args.z_rotation)
+        nrm = rotate_z(nrm, args.z_rotation)
+        print(f"[Rotate] applied {args.z_rotation:.4f} rad about Z")
+
     nrm_out = nrm if args.normals else None
     (write_ply if fmt == '.ply' else write_pcd)(out, pts, nrm_out, intensity)
     print(f"[Done] {time.time() - t0:.2f}s")
